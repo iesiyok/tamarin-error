@@ -1,0 +1,117 @@
+theory NoErrorModel
+begin
+
+functions: 
+    pk/1, sk/1[private],
+    sign/2, verify/3,
+    true/0
+
+equations: 
+    verify(pk(sk(i)), sign(sk(i), m), m ) = true
+
+
+let PartA =
+(
+    in(<$b,$a,$c>);
+    out(msgNote)
+) 
+
+let PartB = 
+    (
+            in(pat_msgNote); 
+            if verify(pkA, dsig, amsg )=true() then
+                lock $a;
+                insert <'B','bb', $a>, $b; 
+                insert <'B','cc', $a>, $c;
+                event PartBUpdatedLogs($a, dsig);
+                insert <'B','signA', $a>, dsig;
+                
+                unlock $a
+    )
+
+
+let PartC = 
+    (
+        new ~n;
+        in($r_a);
+        out(msgNr);
+        in(pat_mResp); 
+
+        if verify(pkB, c_sigResp, c_resp)=true() &
+            verify(pkA, c_dsig, <'msg1', $x_b, $r_a, $x_c> )=true() then
+                    
+                    event CClaims(<$r_a, ~n, c_dsig, c_sigResp>)
+
+    )
+
+let PartD =
+    (
+            in(pat_msgNr);
+            if verify(pkC, wsig, nr)=true() then
+                lookup <'B','bb', $r_a> as $x_b in
+                lookup <'B','cc', $r_a> as $x_c in
+                lookup <'B','signA', $r_a> as x_dsig in
+                event ResponseSent($r_a, x_dsig, ~n);
+                event DClaims(<$r_a, ~n, x_dsig, sigResp>);
+                out(mResp)
+                
+    )
+
+
+
+lemma cclaims_partial:
+    "
+        All x #i #k. (CClaims(x)@i & Corrupted('C')@k & not ( Ex #j. DClaims(x)@j & j <i )) 
+            ==> (Ex #l . Corrupted('B')@l  )
+    "
+
+
+lemma a_or_adv_provide [sources]:
+    "
+    All u s1 n #i. ResponseSent(u,s1,n)@i ==>
+        ((Ex #j. KU(<u,s1,n>)@j & j<i ) | (Ex #j. PartBUpdatedLogs(u,s1)@j & j<i  ))
+    
+    "
+
+
+let skA = sk('A')
+    pkA = pk(skA)
+    skB = sk('B')
+    pkB = pk(skB)
+    skC = sk('C')
+    pkC = pk(skC)
+
+
+    amsg  = <'msg1', $b, $a, $c> 
+    sigAmsg = sign(skA, amsg)
+    // logstamp = sign(skL, sigAmsg)
+    msgNote = <'msg2', amsg, sigAmsg>//A outputs
+
+    pat_msgNote = <'msg2', amsg, dsig>//B receives
+
+    nr      = <$r_a, ~n>
+    sigNr   = sign(skC, nr)
+    msgNr       = <'msg3', nr, sigNr>//C outputs
+
+    pat_msgNr   = <'msg3', nr, wsig>//D receives
+
+    resp_1      = <~n, $r_a, $x_c, $x_b>
+    // resp_2      = <x_dsig, x_lsig>
+    resp        = <resp_1, x_dsig>
+    sigResp     = sign(skB, resp)  
+    mResp       = <'msg4', resp, sigResp>//D outputs
+
+    // c_resp_2    = <c_dsig, c_lsig >
+    c_resp      = <resp_1, c_dsig >
+
+    pat_mResp   = <'msg4', c_resp, c_sigResp>//C receives the last message
+
+
+in
+    PartA | PartB | PartC | PartD
+    | ( in($p);event Corrupted($p); out(sk($p)))
+    | out(pkA)
+    | out(pkB)
+    | out(pkC)
+
+end
